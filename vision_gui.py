@@ -1,6 +1,7 @@
 """
 PyQt6 Industrial Vision Inspection Tool
-Features: Live camera, ROI editing, parameter adjustment, config save/load, OK/NG display
+Features: Live camera, ROI editing, parameter adjustment, config save/load, OK/NG display, Sample Teaching
+Refactored with reusable ROI management
 """
 
 import sys
@@ -8,250 +9,17 @@ import json
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Optional, Tuple, List
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QSlider, QGroupBox, QFileDialog, QMessageBox,
-    QSpinBox, QComboBox, QGridLayout, QFrame
+    QSpinBox, QComboBox, QGridLayout, QInputDialog
 )
-from PyQt6.QtCore import Qt, QTimer, QPoint, QRect, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont
 
 from config import InspectionConfig
 from main import ConnectorInspectionSystem
-
-
-class ROIEditor(QLabel):
-    """Interactive ROI editor widget with mouse drawing"""
-    
-    roi_changed = pyqtSignal(dict)  # Emitted when ROI changes
-    
-    def __init__(self):
-        super().__init__()
-        self.setMinimumSize(800, 600)
-        self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Sunken)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # ROI state
-        self.roi_rect = None  # QRect
-        self.drawing = False
-        self.start_point = None
-        self.current_image = None
-        self.scale_factor = 1.0
-        
-        # Editing state
-        self.dragging = False
-        self.resizing = False
-        self.resize_corner = None
-        self.drag_offset = QPoint()
-        
-        self.setMouseTracking(True)
-        
-    def set_image(self, image: np.ndarray):
-        """Update displayed image"""
-        self.current_image = image.copy()
-        self.update_display()
-        
-    def update_display(self):
-        """Refresh the display with current image and ROI"""
-        if self.current_image is None:
-            return
-            
-        # Convert to QImage
-        height, width, channel = self.current_image.shape
-        bytes_per_line = 3 * width
-        q_img = QImage(self.current_image.data, width, height, 
-                       bytes_per_line, QImage.Format.Format_BGR888)
-        
-        # Scale to fit widget
-        pixmap = QPixmap.fromImage(q_img)
-        scaled_pixmap = pixmap.scaled(self.size(), 
-                                      Qt.AspectRatioMode.KeepAspectRatio,
-                                      Qt.TransformationMode.SmoothTransformation)
-        
-        self.scale_factor = scaled_pixmap.width() / width
-        
-        # Draw ROI if exists
-        if self.roi_rect:
-            painter = QPainter(scaled_pixmap)
-            
-            # Scale ROI to display coordinates
-            scaled_rect = QRect(
-                int(self.roi_rect.x() * self.scale_factor),
-                int(self.roi_rect.y() * self.scale_factor),
-                int(self.roi_rect.width() * self.scale_factor),
-                int(self.roi_rect.height() * self.scale_factor)
-            )
-            
-            # Draw ROI rectangle
-            painter.setPen(QPen(QColor(0, 255, 0), 2, Qt.PenStyle.SolidLine))
-            painter.drawRect(scaled_rect)
-            
-            # Draw resize handles
-            handle_size = 8
-            painter.setBrush(QColor(0, 255, 0))
-            corners = [
-                scaled_rect.topLeft(),
-                scaled_rect.topRight(),
-                scaled_rect.bottomLeft(),
-                scaled_rect.bottomRight()
-            ]
-            for corner in corners:
-                painter.drawRect(corner.x() - handle_size//2, 
-                               corner.y() - handle_size//2,
-                               handle_size, handle_size)
-            
-            painter.end()
-        
-        self.setPixmap(scaled_pixmap)
-        
-    def mousePressEvent(self, event):
-        """Handle mouse press for drawing/editing ROI"""
-        if self.current_image is None:
-            return
-            
-        pos = event.pos()
-        # Adjust for pixmap offset in label
-        pixmap = self.pixmap()
-        if pixmap:
-            offset_x = (self.width() - pixmap.width()) // 2
-            offset_y = (self.height() - pixmap.height()) // 2
-            pos = QPoint(pos.x() - offset_x, pos.y() - offset_y)
-        
-        # Convert to image coordinates
-        img_pos = QPoint(int(pos.x() / self.scale_factor),
-                        int(pos.y() / self.scale_factor))
-        
-        if self.roi_rect:
-            # Check if clicking on resize handle
-            corner = self._get_corner_at_pos(pos)
-            if corner is not None:
-                self.resizing = True
-                self.resize_corner = corner
-                return
-                
-            # Check if clicking inside ROI for dragging
-            scaled_rect = QRect(
-                int(self.roi_rect.x() * self.scale_factor),
-                int(self.roi_rect.y() * self.scale_factor),
-                int(self.roi_rect.width() * self.scale_factor),
-                int(self.roi_rect.height() * self.scale_factor)
-            )
-            if scaled_rect.contains(pos):
-                self.dragging = True
-                self.drag_offset = QPoint(img_pos.x() - self.roi_rect.x(),
-                                         img_pos.y() - self.roi_rect.y())
-                return
-        
-        # Start drawing new ROI
-        self.drawing = True
-        self.start_point = img_pos
-        self.roi_rect = QRect(img_pos, img_pos)
-        
-    def mouseMoveEvent(self, event):
-        """Handle mouse move for drawing/editing ROI"""
-        if self.current_image is None:
-            return
-            
-        pos = event.pos()
-        pixmap = self.pixmap()
-        if pixmap:
-            offset_x = (self.width() - pixmap.width()) // 2
-            offset_y = (self.height() - pixmap.height()) // 2
-            pos = QPoint(pos.x() - offset_x, pos.y() - offset_y)
-        
-        img_pos = QPoint(int(pos.x() / self.scale_factor),
-                        int(pos.y() / self.scale_factor))
-        
-        # Clamp to image bounds
-        h, w = self.current_image.shape[:2]
-        img_pos.setX(max(0, min(w, img_pos.x())))
-        img_pos.setY(max(0, min(h, img_pos.y())))
-        
-        if self.drawing:
-            self.roi_rect = QRect(self.start_point, img_pos).normalized()
-            self.update_display()
-        elif self.dragging:
-            new_x = img_pos.x() - self.drag_offset.x()
-            new_y = img_pos.y() - self.drag_offset.y()
-            self.roi_rect.moveTo(new_x, new_y)
-            self.update_display()
-        elif self.resizing and self.resize_corner is not None:
-            self._resize_roi(img_pos)
-            self.update_display()
-            
-    def mouseReleaseEvent(self, event):
-        """Handle mouse release"""
-        if self.drawing or self.dragging or self.resizing:
-            self.drawing = False
-            self.dragging = False
-            self.resizing = False
-            self.resize_corner = None
-            
-            if self.roi_rect:
-                # Emit ROI changed signal
-                roi_dict = {
-                    'x': self.roi_rect.x(),
-                    'y': self.roi_rect.y(),
-                    'width': self.roi_rect.width(),
-                    'height': self.roi_rect.height()
-                }
-                self.roi_changed.emit(roi_dict)
-                
-    def _get_corner_at_pos(self, pos: QPoint) -> Optional[str]:
-        """Check if position is near a resize corner"""
-        if not self.roi_rect:
-            return None
-            
-        scaled_rect = QRect(
-            int(self.roi_rect.x() * self.scale_factor),
-            int(self.roi_rect.y() * self.scale_factor),
-            int(self.roi_rect.width() * self.scale_factor),
-            int(self.roi_rect.height() * self.scale_factor)
-        )
-        
-        handle_size = 12
-        corners = {
-            'tl': scaled_rect.topLeft(),
-            'tr': scaled_rect.topRight(),
-            'bl': scaled_rect.bottomLeft(),
-            'br': scaled_rect.bottomRight()
-        }
-        
-        for corner_name, corner_pos in corners.items():
-            if (abs(pos.x() - corner_pos.x()) < handle_size and
-                abs(pos.y() - corner_pos.y()) < handle_size):
-                return corner_name
-        return None
-        
-    def _resize_roi(self, pos: QPoint):
-        """Resize ROI based on corner being dragged"""
-        if self.resize_corner == 'tl':
-            self.roi_rect.setTopLeft(pos)
-        elif self.resize_corner == 'tr':
-            self.roi_rect.setTopRight(pos)
-        elif self.resize_corner == 'bl':
-            self.roi_rect.setBottomLeft(pos)
-        elif self.resize_corner == 'br':
-            self.roi_rect.setBottomRight(pos)
-        self.roi_rect = self.roi_rect.normalized()
-        
-    def set_roi(self, roi_dict: dict):
-        """Set ROI from dictionary"""
-        self.roi_rect = QRect(roi_dict['x'], roi_dict['y'],
-                             roi_dict['width'], roi_dict['height'])
-        self.update_display()
-        
-    def get_roi(self) -> Optional[dict]:
-        """Get current ROI as dictionary"""
-        if self.roi_rect:
-            return {
-                'x': self.roi_rect.x(),
-                'y': self.roi_rect.y(),
-                'width': self.roi_rect.width(),
-                'height': self.roi_rect.height()
-            }
-        return None
+from roi_manager import InteractiveROIEditor, ROI, ROIMode
 
 
 class InspectionGUI(QMainWindow):
@@ -278,6 +46,11 @@ class InspectionGUI(QMainWindow):
         # Product configurations
         self.current_config_file = None
         
+        # Teaching mode
+        self.teaching_mode = False
+        self.teaching_image = None
+        self.templates = []  # List of saved templates
+        
         self.init_ui()
         
     def init_ui(self):
@@ -289,10 +62,12 @@ class InspectionGUI(QMainWindow):
         # Left panel: Camera view and ROI editor
         left_panel = QVBoxLayout()
         
-        # Camera view
+        # Camera view with ROI editor
         camera_group = QGroupBox("Live Camera View")
         camera_layout = QVBoxLayout()
-        self.roi_editor = ROIEditor()
+        
+        # Use refactored ROI editor
+        self.roi_editor = InteractiveROIEditor(multi_roi=False)
         self.roi_editor.roi_changed.connect(self.on_roi_changed)
         camera_layout.addWidget(self.roi_editor)
         
@@ -419,6 +194,35 @@ class InspectionGUI(QMainWindow):
         roi_group.setLayout(roi_layout)
         right_panel.addWidget(roi_group)
         
+        # Sample Teaching
+        teaching_group = QGroupBox("Sample Teaching")
+        teaching_layout = QVBoxLayout()
+        
+        self.btn_load_sample = QPushButton("Load Sample Image")
+        self.btn_load_sample.clicked.connect(self.load_sample_image)
+        teaching_layout.addWidget(self.btn_load_sample)
+        
+        self.teaching_status_label = QLabel("No sample loaded")
+        self.teaching_status_label.setStyleSheet("padding: 5px; background-color: #f0f0f0;")
+        teaching_layout.addWidget(self.teaching_status_label)
+        
+        self.btn_save_template = QPushButton("Save ROI as Template")
+        self.btn_save_template.clicked.connect(self.save_roi_as_template)
+        self.btn_save_template.setEnabled(False)
+        teaching_layout.addWidget(self.btn_save_template)
+        
+        self.btn_clear_sample = QPushButton("Clear Sample / Resume Camera")
+        self.btn_clear_sample.clicked.connect(self.clear_sample)
+        self.btn_clear_sample.setEnabled(False)
+        teaching_layout.addWidget(self.btn_clear_sample)
+        
+        # Template list
+        self.template_list_label = QLabel("Saved Templates: 0")
+        teaching_layout.addWidget(self.template_list_label)
+        
+        teaching_group.setLayout(teaching_layout)
+        right_panel.addWidget(teaching_group)
+        
         # Configuration management
         config_group = QGroupBox("Product Configuration")
         config_layout = QVBoxLayout()
@@ -485,6 +289,9 @@ class InspectionGUI(QMainWindow):
         
     def update_frame(self):
         """Update camera frame"""
+        if self.teaching_mode:
+            return  # Don't update camera when in teaching mode
+            
         if self.camera and self.camera.isOpened():
             ret, frame = self.camera.read()
             if ret:
@@ -495,23 +302,23 @@ class InspectionGUI(QMainWindow):
                 if self.chk_continuous.isChecked():
                     self.perform_inspection()
                     
-    def on_roi_changed(self, roi_dict: dict):
+    def on_roi_changed(self, roi: ROI):
         """Handle ROI change from editor"""
-        self.spin_roi_x.setValue(roi_dict['x'])
-        self.spin_roi_y.setValue(roi_dict['y'])
-        self.spin_roi_width.setValue(roi_dict['width'])
-        self.spin_roi_height.setValue(roi_dict['height'])
+        self.spin_roi_x.setValue(roi.x)
+        self.spin_roi_y.setValue(roi.y)
+        self.spin_roi_width.setValue(roi.width)
+        self.spin_roi_height.setValue(roi.height)
         self.update_config_roi()
         
     def apply_roi_from_spinboxes(self):
         """Apply ROI values from spinboxes to editor"""
-        roi_dict = {
-            'x': self.spin_roi_x.value(),
-            'y': self.spin_roi_y.value(),
-            'width': self.spin_roi_width.value(),
-            'height': self.spin_roi_height.value()
-        }
-        self.roi_editor.set_roi(roi_dict)
+        roi = ROI(
+            x=self.spin_roi_x.value(),
+            y=self.spin_roi_y.value(),
+            width=self.spin_roi_width.value(),
+            height=self.spin_roi_height.value()
+        )
+        self.roi_editor.add_roi(roi)
         self.update_config_roi()
         
     def update_config_roi(self):
@@ -584,6 +391,115 @@ class InspectionGUI(QMainWindow):
             self.result_label.setStyleSheet("background-color: red; color: white; padding: 20px;")
             defects = ", ".join([d.name for d in result.defects_found])
             self.defect_label.setText(f"Defects: {defects}")
+    
+    def load_sample_image(self):
+        """Load a sample image for teaching"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Load Sample Image", "", 
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.tiff *.tif)"
+        )
+        
+        if filename:
+            image = cv2.imread(filename)
+            if image is None:
+                QMessageBox.warning(self, "Error", "Failed to load image!")
+                return
+                
+            self.teaching_image = image
+            self.teaching_mode = True
+            self.current_frame = image
+            self.roi_editor.set_image(image)
+            
+            self.teaching_status_label.setText(f"Sample: {Path(filename).name}")
+            self.teaching_status_label.setStyleSheet("padding: 5px; background-color: #d4edda; color: #155724;")
+            self.btn_save_template.setEnabled(True)
+            self.btn_clear_sample.setEnabled(True)
+            
+            # Disable camera controls during teaching
+            self.btn_start_camera.setEnabled(False)
+            if self.camera and self.camera.isOpened():
+                self.camera_timer.stop()
+                
+    def clear_sample(self):
+        """Clear sample image and resume camera"""
+        self.teaching_mode = False
+        self.teaching_image = None
+        
+        self.teaching_status_label.setText("No sample loaded")
+        self.teaching_status_label.setStyleSheet("padding: 5px; background-color: #f0f0f0;")
+        self.btn_save_template.setEnabled(False)
+        self.btn_clear_sample.setEnabled(False)
+        
+        # Re-enable camera
+        self.btn_start_camera.setEnabled(True)
+        if self.camera and self.camera.isOpened():
+            self.camera_timer.start(33)
+        else:
+            self.roi_editor.set_image(np.zeros((480, 640, 3), dtype=np.uint8))
+            
+    def save_roi_as_template(self):
+        """Save current ROI as a reference template"""
+        if self.teaching_image is None:
+            QMessageBox.warning(self, "Error", "No sample image loaded!")
+            return
+            
+        roi = self.roi_editor.get_active_roi()
+        if roi is None:
+            QMessageBox.warning(self, "Error", "Please define an ROI first!")
+            return
+            
+        # Validate ROI bounds
+        img_h, img_w = self.teaching_image.shape[:2]
+        if not roi.is_valid((img_h, img_w)):
+            QMessageBox.warning(self, "Error", "ROI is out of image bounds!")
+            return
+            
+        roi_image = roi.extract_from_image(self.teaching_image)
+        
+        # Ask for template name
+        template_name, ok = QInputDialog.getText(
+            self, "Template Name", "Enter template name:"
+        )
+        
+        if not ok or not template_name:
+            return
+            
+        # Create templates directory if it doesn't exist
+        templates_dir = Path("templates")
+        templates_dir.mkdir(exist_ok=True)
+        
+        # Save template image
+        template_filename = templates_dir / f"{template_name}.png"
+        cv2.imwrite(str(template_filename), roi_image)
+        
+        # Update ROI metadata
+        roi.name = template_name
+        roi.mode = ROIMode.TEACHING
+        roi.metadata = {
+            'filename': str(template_filename),
+            'created_from': 'teaching_mode',
+            'parameters': {
+                'threshold': self.config.WIRE_PRESENCE_THRESHOLD,
+                'min_area': self.config.WIRE_PRESENCE_MIN_AREA,
+                'color_tolerance': self.config.COLOR_MATCH_TOLERANCE,
+                'color_confidence': self.config.COLOR_MATCH_MIN_CONFIDENCE
+            }
+        }
+        
+        # Create template metadata and save
+        template_data = roi.to_dict()
+        self.templates.append(template_data)
+        self.update_template_list()
+        
+        QMessageBox.information(
+            self, "Success", 
+            f"Template '{template_name}' saved successfully!\n"
+            f"Location: {template_filename}"
+        )
+        
+    def update_template_list(self):
+        """Update the template list display"""
+        self.template_list_label.setText(f"Saved Templates: {len(self.templates)}")
             
     def save_configuration(self):
         """Save current configuration to JSON file"""
@@ -603,6 +519,7 @@ class InspectionGUI(QMainWindow):
                 'WIRE_SLOT_SPACING': self.config.WIRE_SLOT_SPACING,
                 'WIRE_SLOT_START_X': self.config.WIRE_SLOT_START_X,
                 'WIRE_SLOT_START_Y': self.config.WIRE_SLOT_START_Y,
+                'templates': self.templates
             }
             
             with open(filename, 'w') as f:
@@ -635,6 +552,10 @@ class InspectionGUI(QMainWindow):
                 self.config.WIRE_SLOT_START_X = config_data.get('WIRE_SLOT_START_X', 520)
                 self.config.WIRE_SLOT_START_Y = config_data.get('WIRE_SLOT_START_Y', 320)
                 
+                # Load templates
+                self.templates = config_data.get('templates', [])
+                self.update_template_list()
+                
                 # Update UI
                 self.slider_wire_threshold.setValue(self.config.WIRE_PRESENCE_THRESHOLD)
                 self.spin_min_area.setValue(self.config.WIRE_PRESENCE_MIN_AREA)
@@ -645,7 +566,15 @@ class InspectionGUI(QMainWindow):
                 self.spin_roi_y.setValue(self.config.CONNECTOR_ROI['y'])
                 self.spin_roi_width.setValue(self.config.CONNECTOR_ROI['width'])
                 self.spin_roi_height.setValue(self.config.CONNECTOR_ROI['height'])
-                self.roi_editor.set_roi(self.config.CONNECTOR_ROI)
+                
+                # Set ROI in editor
+                roi = ROI(
+                    x=self.config.CONNECTOR_ROI['x'],
+                    y=self.config.CONNECTOR_ROI['y'],
+                    width=self.config.CONNECTOR_ROI['width'],
+                    height=self.config.CONNECTOR_ROI['height']
+                )
+                self.roi_editor.add_roi(roi)
                 
                 # Reinitialize inspection system
                 self.inspection_system = ConnectorInspectionSystem(self.config)
