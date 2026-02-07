@@ -1,558 +1,151 @@
-# AOI Connector Inspection System
+# Industrial Vision Inspection System
 
-**Automated Optical Inspection (AOI) system for electrical connector quality control**
+Production-grade wire order inspection system with automatic ROI localization and deterministic state management.
 
-A production-ready, modular computer vision system for inspecting electrical connectors with multiple wires. Detects defects in real-time using classical image processing techniques with OpenCV.
+## Features
 
----
 
-## 🎯 Features
+## Project Structure
 
-### Defect Detection Capabilities
-- **Missing Wire Detection** - Identifies empty connector slots
-- **Wire Order Verification** - Validates correct wire color sequence
-- **Connector Position Detection** - Detects misalignment/offset
-- **Insertion Depth Analysis** - Ensures wires are fully inserted
-
-### System Characteristics
-- ✅ **Fast Processing**: Target < 100ms per image
-- ✅ **No Deep Learning**: Classical CV techniques only
-- ✅ **ROI-Based**: Optimized region-of-interest processing
-- ✅ **Modular Design**: Easy to customize and extend
-- ✅ **Production Ready**: Error handling, logging, batch processing
-- ✅ **Real-time Capable**: Suitable for inline inspection
-
----
-
-## 📋 Requirements
-
-### Hardware
-- Fixed camera position
-- Controlled lighting environment
-- Known product geometry
-
-### Software
 ```
-Python >= 3.7
-OpenCV >= 4.5.0
-NumPy >= 1.19.0
+ImageDetection\
+├── main.py                          # Application entry point
+│
+├── app/
+│   ├── controller/
+│   │   ├── behavior_controller.py   # State machine
+│   │   └── app_controller.py        # Application flow controller
+│   │
+│   ├── ui/
+│   │   ├── main_window.py           # Main PyQt6 window
+│   │   └── roi_editor.py            # ROI drawing widget
+│   │
+│   ├── vision/
+│   │   ├── image_source.py          # Camera/file abstraction
+│   │   ├── roi_locator.py           # Template matching
+│   │   ├── color_detector.py        # HSV color detection
+│   │   ├── wire_segmenter.py        # Wire segment extraction
+│   │   ├── inspector.py             # Main inspection logic
+│   │   └── golden_sample.py         # Sample management
+│   │
+│   ├── config/
+│   │   └── paths.py                 # Centralized path config
+│   │
+│   ├── utils/
+│   │   ├── logger.py                # Logging setup
+│   │   └── timer.py                 # Performance profiling
+│   │
+│   └── data/
+│       └── golden/
+│           ├── configs/             # Golden sample configs
+│           └── templates/           # Template images
+│
+├── logs/                            # Application logs
+├── requirements.txt
+└── README.md
 ```
 
----
+## Installation
 
-## 🚀 Quick Start
+### Prerequisites and setup for develop
 
-### Installation
+- Python 3.9 or higher
+- Camera device (optional, for camera mode)
+
 
 ```bash
-# Clone or download this repository
-cd ImageDetection
-
-# Create virtual environment
+# Create virtual environment (recommended)
+# Windows (git bash)
 python -m venv venv
+venv\Scripts\activate
 
-# Activate virtual environment
-# On Windows: (Git bash)
-source venv/Scripts/activate
-# On Linux/Mac:
+#Linux/Mac
 source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-# Or install manually:
-pip install opencv-python numpy
 ```
 
-### Basic Usage
+## Usage
 
-```python
-from main import ConnectorInspectionSystem
+### Starting the Application
 
-# Initialize inspection system
-inspector = ConnectorInspectionSystem()
-
-# Inspect single image
-result = inspector.inspect_from_file("path/to/image.jpg")
-
-# Check result
-print(f"Status: {result.status}")  # OK or NG
-print(f"Defect: {result.defect_type}")
-print(f"Time: {result.processing_time_ms:.2f} ms")
-```
-
-### Run Demo
 ```bash
 python main.py
 ```
 
----
+### Workflow
 
-## 📁 Project Structure
+1. **Teach Golden Sample** (First Time Only)
+   - Click "Load Sample Image" or "Teach from Camera"
+   - Define ROI using mouse (connector area for template, wire area for inspection)
+   - Enter golden sample name
+   - Click "Save Golden Sample"
+   - Expected wire colors are automatically detected
+
+2. **Image Mode Inspection**
+   - Select "Image Mode"
+   - Click "Load Image"
+   - Click "Single Inspection"
+   - View result (OK/NG) with defect details
+
+3. **Camera Mode Inspection**
+   - Select "Camera Mode"
+   - Click "Start Camera"
+   - Click "Single Inspection" or enable "Continuous Inspection"
+   - View real-time results
+
+### State Machine
 
 ```
-ImageDetection/
-│
-├── main.py                 # Main inspection system & orchestration
-├── config.py               # Configuration & parameters
-├── inspectors.py           # Defect detection modules
-├── image_utils.py          # Image processing utilities
-├── examples.py             # Usage examples & integration patterns
-├── README.md               # This file
-│
-└── Samples/                # Test images directory
-    ├── connector_test.jpg
-    ├── golden_sample.jpg
-    └── ...
+IDLE → IMAGE_MODE/CAMERA_MODE → TEACH_SAMPLE → READY → INSPECTION → (back to mode)
+                                                   ↓
+                                               ERROR → Recovery
 ```
 
----
+## Configuration
 
-## 🔧 Configuration
-
-Edit `config.py` to customize inspection parameters:
-
-```python
-from config import InspectionConfig
-
-config = InspectionConfig()
-
-# Connector geometry
-config.NUM_WIRES = 4  # Number of wires in connector
-config.WIRE_COLORS = [  # Expected wire colors (BGR)
-    ('red', [0, 0, 255]),
-    ('black', [0, 0, 0]),
-    ('white', [255, 255, 255]),
-    ('blue', [255, 0, 0])
-]
-
-# ROI positions (adjust for your setup)
-config.CONNECTOR_ROI = {'x': 500, 'y': 300, 'width': 800, 'height': 400}
-config.WIRE_SLOT_START_X = 520
-config.WIRE_SLOT_START_Y = 320
-config.WIRE_SLOT_SPACING = 200
-
-# Detection thresholds
-config.POSITION_MAX_OFFSET_X = 15  # pixels
-config.POSITION_MAX_OFFSET_Y = 15
-config.WIRE_PRESENCE_MIN_AREA = 500
-config.INSERTION_MIN_DEPTH = 280
-
-# Enable/disable specific checks
-config.ENABLE_POSITION_CHECK = True
-config.ENABLE_WIRE_PRESENCE_CHECK = True
-config.ENABLE_WIRE_ORDER_CHECK = True
-config.ENABLE_INSERTION_DEPTH_CHECK = True
+Golden sample configurations are stored in:
+```
+app/data/golden/configs/golden_sample.json
 ```
 
----
+## System Requirements
 
-## 💡 Usage Examples
 
-### Example 1: Basic Inspection
-```python
-from main import ConnectorInspectionSystem
+## Logging
 
-inspector = ConnectorInspectionSystem()
-result = inspector.inspect_from_file("Samples/connector_001.jpg")
-print(result)
-```
+Logs are stored in `logs/inspection_YYYYMMDD.log`
 
-### Example 2: Batch Processing
-```python
-image_list = [
-    "Samples/connector_001.jpg",
-    "Samples/connector_002.jpg",
-    "Samples/connector_003.jpg"
-]
 
-results = inspector.inspect_batch(image_list)
-```
+## Troubleshooting
 
-### Example 3: Camera Integration
-```python
-import cv2
+### "Golden sample file not found"
+- Run teaching mode first to create a golden sample
 
-# Capture from camera
-cap = cv2.VideoCapture(0)
-ret, frame = cap.read()
+### "Template match failed"
+- Part may be misaligned - check product placement
+- Re-teach golden sample with better template area
 
-# Inspect frame
-result = inspector.inspect(frame, image_id="camera_001")
+### "ROI out of bounds"
+- Image size differs from golden sample
+- Re-teach with correct image resolution
 
-if result.status == "NG":
-    print(f"Defect detected: {result.defect_type}")
-    # Trigger reject mechanism
-```
+### Camera not opening
+- Check camera device index (0, 1, 2)
+- Verify camera is not in use by another application
+- Check USB connection
 
-### Example 4: Golden Sample Calibration
-```python
-# Calibrate with known good sample
-inspector.calibrate_from_golden_sample("Samples/golden_sample.jpg")
 
-# Now inspect test parts
-result = inspector.inspect_from_file("test_part.jpg")
-```
+## License
 
-### Example 5: Custom Configuration
-```python
-from config import InspectionConfig
+Proprietary - Industrial Automation Team
 
-config = InspectionConfig()
-config.POSITION_MAX_OFFSET_X = 20  # More tolerant
-config.SAVE_DEBUG_IMAGES = True     # Save debug output
+## Support
 
-inspector = ConnectorInspectionSystem(config)
-```
-
-**See `examples.py` for 10+ comprehensive usage examples!**
+For issues or questions, contact the development team.
 
 ---
 
-## 🏗️ Architecture
-
-### System Overview
-
-```
-Input Image
-    ↓
-┌─────────────────────────┐
-│  ConnectorInspection    │
-│  System (main.py)       │
-└─────────────────────────┘
-    ↓
-┌─────────────────────────┐
-│  Image Preprocessing    │
-│  (image_utils.py)       │
-└─────────────────────────┘
-    ↓
-┌─────────────────────────────────────────────┐
-│           Inspector Modules                 │
-│  (inspectors.py)                            │
-├─────────────────────────────────────────────┤
-│  • WirePresenceInspector                    │
-│  • WireOrderInspector                       │
-│  • ConnectorPositionInspector               │
-│  • WireInsertionInspector                   │
-└─────────────────────────────────────────────┘
-    ↓
-InspectionResult
-    ↓
-OK / NG + Defect Type
-```
-
-### Key Components
-
-#### 1. **config.py** - Configuration Management
-- `InspectionConfig`: All tunable parameters
-- `DefectTypes`: Defect type enumeration
-- `InspectionResult`: Result data structure
-
-#### 2. **image_utils.py** - Image Processing Utilities
-- `ROIExtractor`: ROI extraction and management
-- `ImagePreprocessor`: Image preprocessing (blur, threshold, edge detection)
-- `ColorAnalyzer`: Color-based wire identification
-- `VisualizationHelper`: Result visualization
-
-#### 3. **inspectors.py** - Defect Detection Modules
-- `WirePresenceInspector`: Detects missing wires using contour analysis
-- `WireOrderInspector`: Validates wire color sequence
-- `ConnectorPositionInspector`: Detects position offset using template matching or centroid
-- `WireInsertionInspector`: Measures insertion depth using edge detection
-- `InspectorFactory`: Creates and manages inspector instances
-
-#### 4. **main.py** - Main Inspection System
-- `ConnectorInspectionSystem`: Orchestrates complete inspection workflow
-- Handles image loading, batch processing, result output
-- Performance monitoring and debug output
-
----
-
-## 🎨 Inspection Workflow
-
-```python
-1. Load Image
-2. [Optional] Enhance Contrast
-3. Check Connector Position
-    ├─ Template matching OR centroid calculation
-    └─ Validate offset within tolerance
-4. Check Wire Presence (for each slot)
-    ├─ Extract ROI
-    ├─ Apply threshold
-    ├─ Find contours
-    └─ Validate minimum area
-5. Check Wire Order (for each wire)
-    ├─ Extract dominant color
-    ├─ Match to expected colors
-    └─ Validate confidence
-6. Check Insertion Depth (for each wire)
-    ├─ Edge detection
-    ├─ Measure wire length
-    └─ Validate minimum depth
-7. Compile Results
-8. Output: OK/NG + Defect Type
-```
-
----
-
-## ⚡ Performance Optimization
-
-### Tips for <100ms Processing
-
-1. **Optimize ROI Sizes**
-   ```python
-   config.WIRE_SLOT_WIDTH = 150  # Smaller = faster
-   config.WIRE_SLOT_HEIGHT = 300
-   ```
-
-2. **Reduce Preprocessing**
-   ```python
-   config.GAUSSIAN_BLUR_KERNEL = (3, 3)  # Smaller kernel
-   ```
-
-3. **Selective Inspection**
-   ```python
-   # Disable non-critical checks
-   config.ENABLE_WIRE_ORDER_CHECK = False
-   ```
-
-4. **Disable Debug Output**
-   ```python
-   config.SAVE_DEBUG_IMAGES = False
-   config.SHOW_VISUALIZATION = False
-   ```
-
-5. **Use NumPy Optimizations**
-   - Already implemented in code
-   - Vectorized operations where possible
-
-### Benchmark Performance
-Run performance test:
-```python
-python examples.py  # Uncomment example_9_performance_optimization()
-```
-
----
-
-## 🔍 Defect Detection Algorithms
-
-### Missing Wire Detection
-- **Method**: Contour area analysis
-- **Algorithm**: 
-  1. Convert ROI to grayscale
-  2. Apply binary threshold
-  3. Morphological operations (open/close)
-  4. Find contours
-  5. Check max contour area vs. threshold
-
-### Wire Order Detection
-- **Method**: Color matching
-- **Algorithm**:
-  1. Extract dominant color from wire ROI
-  2. Calculate Euclidean distance to expected colors
-  3. Match to closest color within tolerance
-  4. Validate confidence score
-
-### Position Detection
-- **Method**: Template matching or centroid
-- **Algorithm** (Template):
-  1. Match reference template to current image
-  2. Find best match location
-  3. Calculate offset from expected center
-  4. Validate offset within tolerance
-
-### Insertion Depth Detection
-- **Method**: Edge-based length measurement
-- **Algorithm**:
-  1. Canny edge detection on wire ROI
-  2. Vertical edge projection
-  3. Find first/last significant edge rows
-  4. Calculate span as insertion depth
-  5. Validate against minimum depth
-
----
-
-## 🔌 Integration Patterns
-
-### PLC Integration
-```python
-# Wait for trigger from PLC
-while plc.wait_for_trigger():
-    image = camera.grab_frame()
-    result = inspector.inspect(image)
-    
-    # Send result to PLC
-    plc.write("result", 1 if result.status == "OK" else 0)
-    plc.write("defect_code", encode_defect(result.defect_type))
-```
-
-### Camera Integration
-```python
-# With industrial camera
-from pypylon import pylon
-
-camera = pylon.InstantCamera()
-camera.Open()
-camera.StartGrabbing()
-
-grab_result = camera.RetrieveResult(5000)
-if grab_result.GrabSucceeded():
-    image = grab_result.Array
-    result = inspector.inspect(image)
-```
-
-### Database Logging
-```python
-# Log results to database
-import sqlite3
-
-def log_result(result, image_id):
-    conn = sqlite3.connect('inspection_log.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO inspections (image_id, status, defect_type, time_ms)
-        VALUES (?, ?, ?, ?)
-    ''', (image_id, result.status, result.defect_type, result.processing_time_ms))
-    conn.commit()
-```
-
----
-
-## 🛠️ Calibration & Setup
-
-### Initial Setup Steps
-
-1. **Position Camera**
-   - Fix camera at optimal distance/angle
-   - Ensure consistent lighting
-
-2. **Capture Golden Sample**
-   ```python
-   # Save image of perfect connector
-   cv2.imwrite("Samples/golden_sample.jpg", camera_frame)
-   ```
-
-3. **Determine ROI Positions**
-   - Use visualization to identify ROI coordinates
-   ```python
-   config.SHOW_VISUALIZATION = True
-   inspector.inspect_from_file("golden_sample.jpg")
-   # Adjust ROI positions in config.py
-   ```
-
-4. **Calibrate System**
-   ```python
-   inspector.calibrate_from_golden_sample("Samples/golden_sample.jpg")
-   ```
-
-5. **Tune Thresholds**
-   - Test with known defect samples
-   - Adjust thresholds to minimize false positives/negatives
-
-6. **Performance Test**
-   - Run batch test to verify processing time
-   - Optimize if needed
-
----
-
-## 📊 Output Format
-
-### InspectionResult Object
-```python
-result.status            # "OK" or "NG"
-result.defect_type       # DefectTypes enum value
-result.defects           # List of all detected defects
-result.processing_time_ms  # Processing time in milliseconds
-result.details           # Dictionary with detailed info per check
-```
-
-### Example Output
-```
-Status: NG
-Defect Type: MISSING_WIRE
-Processing Time: 45.23 ms
-Detected Defects: MISSING_WIRE
-Details:
-  MISSING_WIRE: Missing wires at positions: [2]
-```
-
----
-
-## 🚧 Troubleshooting
-
-### Common Issues
-
-**Issue**: False positives for missing wires
-- **Solution**: Adjust `WIRE_PRESENCE_MIN_AREA` threshold
-- Check lighting conditions
-
-**Issue**: Wrong wire colors detected
-- **Solution**: Calibrate `WIRE_COLORS` BGR values
-- Increase `COLOR_MATCH_TOLERANCE`
-
-**Issue**: Position offset always detected
-- **Solution**: Recalibrate with golden sample
-- Check `CONNECTOR_ROI` coordinates
-
-**Issue**: Processing time > 100ms
-- **Solution**: See Performance Optimization section
-- Reduce ROI sizes
-- Disable non-essential checks
-
-**Issue**: No image display
-- **Solution**: Set `config.SHOW_VISUALIZATION = True`
-- Ensure OpenCV GUI support is installed
-
----
-
-## 🔮 Future Enhancements
-
-Potential improvements for production deployment:
-
-- [ ] Multi-threading for parallel ROI processing
-- [ ] GPU acceleration with OpenCV CUDA
-- [ ] Adaptive thresholding based on lighting conditions
-- [ ] Statistical Process Control (SPC) charting
-- [ ] Web-based dashboard for monitoring
-- [ ] Integration with MES/ERP systems
-- [ ] Automated threshold tuning
-- [ ] Support for different connector types
-- [ ] 3D depth sensing for insertion verification
-
----
-
-## 📝 License
-
-This code is provided as-is for industrial automation and quality control applications.
-
----
-
-## 👤 Author
-
-Developed as an industrial AOI solution for electrical connector inspection.
-
----
-
-## 📞 Support
-
-For issues or questions:
-1. Check the `examples.py` file for usage patterns
-2. Review troubleshooting section above
-3. Verify configuration parameters in `config.py`
-
----
-
-## 🙏 Acknowledgments
-
-Built with:
-- OpenCV - Computer vision library
-- NumPy - Numerical computing
-- Python - Programming language
-
----
-
-**Ready for Production Deployment** ✅
-
-Start inspecting connectors with:
-```bash
-python main.py
-```
+**Version**: 1.0.0  
+**Last Updated**: 2024-02-06

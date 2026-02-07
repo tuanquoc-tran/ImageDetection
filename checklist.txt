@@ -1,0 +1,56 @@
+Wire Color Sequence Inspection - Checklist
+
+1. Golden Sample Preparation
+--------------------------------
+- Capture high-resolution image of the wire assembly (golden sample)
+- Ensure uniform lighting and neutral background
+- Define ROI: area containing the wires
+- Identify and save anchor/fiducial points for ROI alignment
+- Record the correct wire color sequence (labels, order)
+
+2. Camera & Environment Setup
+--------------------------------
+- Fix lighting: avoid shadows and glare
+- Camera: fix focus, exposure, white balance
+- Background: uniform color (white or gray)
+- Fix wires/connectors to minimize distortion
+
+3. Image Preprocessing
+--------------------------------
+- Crop ROI using anchor/template
+- Align image: translation, rotation, scale adjustments
+- Apply noise removal (Gaussian/median filter)
+- Apply color normalization if lighting varies
+
+4. Wire Segmentation
+--------------------------------
+- Convert image to HSV or Lab color space
+- Apply color thresholding for each wire color
+- Detect edges + contours to separate individual wires
+- Determine bounding box or centerline for each wire
+
+5. Color Identification
+--------------------------------
+- Compute average color or histogram for each wire ROI
+- Compare with golden sample or reference color table
+- Record any mismatch or out-of-spec wires
+
+6. Sequence Verification
+--------------------------------
+- Determine the order of wires (e.g., left-to-right, top-to-bottom)
+- Compare actual sequence with expected sequence
+- Mark inspection result: OK / NG
+- Save bounding box positions and detected sequence
+
+7. Reporting & Traceability
+--------------------------------
+- Save inspection image with overlay bounding boxes and sequence
+- Log mismatches: position, color, order
+- Integrate with PLC/MES system to trigger reject/pass actions
+
+8. Maintenance & Robustness
+--------------------------------
+- Test system under different lighting, small rotations, scaling
+- Tune thresholds and color ranges for reliability
+- Update golden samples when new wire models appear
+- Backup golden samples and color reference data

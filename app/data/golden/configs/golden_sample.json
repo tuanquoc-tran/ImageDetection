@@ -1,0 +1,22 @@
+{
+  "sample_name": "11",
+  "creation_date": "2026-02-06T17:28:57.472989",
+  "num_wires": 4,
+  "roi_config": {
+    "connector_x": 621,
+    "connector_y": 1160,
+    "connector_width": 321,
+    "connector_height": 340,
+    "wire_x": 150,
+    "wire_y": 250,
+    "wire_width": 700,
+    "wire_height": 150
+  },
+  "wire_color_order": [
+    "black",
+    "black",
+    "black",
+    "black"
+  ],
+  "notes": "Created via GUI at C:\\git\\ImageDetection"
+}
